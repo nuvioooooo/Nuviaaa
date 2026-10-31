@@ -1449,7 +1449,8 @@ class PluginRuntime @Inject constructor() {
                     audioDelayMs = ((item["behaviorHints"] as? Map<*, *>)?.get("audioDelayMs") as? Number)
                         .toStreamAudioDelayMs(),
                     audioDelayLanguage = ((item["behaviorHints"] as? Map<*, *>)?.get("audioDelayLanguage") as? String)
-                        .toStreamAudioDelayLanguage()
+                        .toStreamAudioDelayLanguage(),
+                    externalAudios = com.nuvio.tv.domain.model.parseExternalAudios(item["externalAudios"])
                 )
             }?.filter { it.url.isNotBlank() } ?: emptyList()
         } catch (e: Exception) {

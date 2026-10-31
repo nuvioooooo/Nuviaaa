@@ -660,6 +660,8 @@ private fun PlayerRuntimeController.applyStreamMetadata(stream: Stream) {
     currentVideoHash = stream.behaviorHints?.videoHash
     currentVideoSize = stream.behaviorHints?.videoSize
     streamSubtitles = stream.subtitles
+    streamExternalAudios = stream.externalAudios
+    externalAudioDefaultApplied = false
     currentAddonName = stream.addonName
     currentAddonLogo = stream.addonLogo
     currentStreamDescription = stream.description
@@ -1026,7 +1028,8 @@ internal fun PlayerRuntimeController.switchToSourceStream(
                         responseHeaders = currentStreamResponseHeaders,
                         mimeTypeOverride = currentStreamMimeType,
                         audioDelayUsProvider = audioDelayUs::get,
-                        cacheKey = currentStreamCacheKey
+                        cacheKey = currentStreamCacheKey,
+                        externalAudios = streamExternalAudios
                     )
                 )
                 player.playWhenReady = true

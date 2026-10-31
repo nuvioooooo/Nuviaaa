@@ -22,6 +22,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
@@ -172,7 +173,88 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         mimeTypeOverride: String? = null,
         audioDelayUsProvider: (() -> Long)? = null,
         mediaMetadata: androidx.media3.common.MediaMetadata? = null,
-        cacheKey: String? = null
+        cacheKey: String? = null,
+        externalAudios: List<com.nuvio.tv.domain.model.ExternalAudio> = emptyList()
+    ): MediaSource {
+        val base = createBaseMediaSource(
+            context = context,
+            url = url,
+            headers = headers,
+            subtitleConfigurations = subtitleConfigurations,
+            subtitleRoutes = subtitleRoutes,
+            filename = filename,
+            responseHeaders = responseHeaders,
+            mimeTypeOverride = mimeTypeOverride,
+            audioDelayUsProvider = audioDelayUsProvider,
+            mediaMetadata = mediaMetadata,
+            cacheKey = cacheKey
+        )
+        val audioSources = externalAudios.mapNotNull { createExternalAudioSource(context, it) }
+        if (externalAudios.isNotEmpty()) {
+            Log.i(LOG_TAG, "EXTERNAL_AUDIO: requested=${externalAudios.size} built=${audioSources.size}")
+        }
+        if (audioSources.isEmpty()) return base
+        // The delay wrapper stays on the video source; a per-track delay is applied by the caller
+        // through the stream-delay path. clipDurations keeps the shorter source from stalling.
+        return MergingMediaSource(false, true, base, *audioSources.toTypedArray())
+    }
+
+    private fun hasDirectAudioExtension(url: String): Boolean {
+        val path = url.substringBefore('#').substringBefore('?').lowercase()
+        return DIRECT_AUDIO_EXTENSIONS.any { path.endsWith(".$it") }
+    }
+
+    internal fun createExternalAudioSource(
+        context: Context,
+        audio: com.nuvio.tv.domain.model.ExternalAudio
+    ): MediaSource? {
+        val audioUrl = audio.url.substringBefore("#.m3u8").takeIf { it.startsWith("http") } ?: return null
+        val audioHeaders = sanitizeHeaders(audio.headers.orEmpty())
+        val mime = if (audioUrl.contains(".mpd", ignoreCase = true)) {
+            MimeTypes.APPLICATION_MPD
+        } else if (audioUrl.contains(".m3u8", ignoreCase = true) ||
+            audio.url.endsWith("#.m3u8")
+        ) {
+            MimeTypes.APPLICATION_M3U8
+        } else if (hasDirectAudioExtension(audioUrl)) {
+            null
+        } else {
+            // Extensionless audio links (typical for CDN playlists) are HLS.
+            MimeTypes.APPLICATION_M3U8
+        }
+        val dataSourceFactory = DefaultDataSource.Factory(
+            context,
+            PlayerPlaybackNetworking.createHttpDataSourceFactory(audioHeaders, useLongReadTimeout = false)
+        )
+        val itemBuilder = MediaItem.Builder().setUri(audioUrl)
+        mime?.let(itemBuilder::setMimeType)
+        val item = itemBuilder.build()
+        return when (mime) {
+            MimeTypes.APPLICATION_M3U8 -> HlsMediaSource.Factory(dataSourceFactory)
+                .setAllowChunklessPreparation(true)
+                .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+                .createMediaSource(item)
+            MimeTypes.APPLICATION_MPD -> DashMediaSource.Factory(dataSourceFactory)
+                .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+                .createMediaSource(item)
+            else -> DefaultMediaSourceFactory(dataSourceFactory)
+                .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+                .createMediaSource(item)
+        }
+    }
+
+    private fun createBaseMediaSource(
+        context: Context,
+        url: String,
+        headers: Map<String, String>,
+        subtitleConfigurations: List<MediaItem.SubtitleConfiguration>,
+        subtitleRoutes: Map<String, SubtitleRoute>,
+        filename: String?,
+        responseHeaders: Map<String, String>,
+        mimeTypeOverride: String?,
+        audioDelayUsProvider: (() -> Long)?,
+        mediaMetadata: androidx.media3.common.MediaMetadata?,
+        cacheKey: String?
     ): MediaSource {
         val sanitizedHeaders = sanitizeHeaders(headers)
         val resolvedMimeType = mimeTypeOverride ?: inferMimeType(
@@ -1102,6 +1184,9 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
                 )
             }
         }
+
+        private val DIRECT_AUDIO_EXTENSIONS =
+            listOf("mp3", "aac", "m4a", "ogg", "opus", "flac", "wav", "mka", "ac3", "eac3", "mp4", "webm")
 
         private val DELIMITED_M3U8_PATTERN = Regex("(^|[=/_.?&-])(m3u8|m3u)($|[=/_.?&-])")
         private val PLAYLIST_HLS_PATTERN = Regex("/(playlist|hls|manifest|master|vs)/(?!stream$|list$|info$|details$)[a-zA-Z0-9_/-]+$")

@@ -237,6 +237,9 @@ class PlayerRuntimeController(
     internal var currentStreamMimeType: String?
     internal var currentHeaders: Map<String, String>
     internal var streamSubtitles: List<Subtitle> = emptyList()
+    internal var streamExternalAudios: List<com.nuvio.tv.domain.model.ExternalAudio> = emptyList()
+    /** Set once the plugin-provided default external audio has been selected for this stream. */
+    internal var externalAudioDefaultApplied = false
 
     init {
         val initialPlaybackRequest = PlayerMediaSourceFactory.normalizePlaybackRequest(
@@ -252,6 +255,8 @@ class PlayerRuntimeController(
         currentHeaders = initialPlaybackRequest.headers
         streamSubtitles = StreamSidecarSubtitles.forUrl(initialStreamUrl)
             .ifEmpty { StreamSidecarSubtitles.forUrl(currentStreamUrl) }
+        streamExternalAudios = StreamSidecarAudio.forUrl(initialStreamUrl)
+            .ifEmpty { StreamSidecarAudio.forUrl(currentStreamUrl) }
     }
 
     fun getCurrentStreamUrl(): String = currentStreamUrl
